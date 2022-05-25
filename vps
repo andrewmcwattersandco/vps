@@ -1,0 +1,3 @@
+#!/bin/sh
+
+printf '%s: not implemented\n' $0
