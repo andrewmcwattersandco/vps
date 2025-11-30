@@ -34,10 +34,30 @@ async function listProviders() {
     return
   }
 
-  let driver = await new Builder().forBrowser('chrome').build()
+  const providerName = process.argv[2]
+  const providerPath = join(__dirname, '../providers', providerName)
+  
   try {
-    await driver.get('https://arh.antoinevastel.com/bots/areyouheadless')
-  } finally {
-    await driver.quit();
+    // Load the provider module
+    const provider = require(providerPath)
+    
+    // Execute the provider's signin function
+    if (typeof provider === 'function') {
+      await provider()
+    } else if (typeof provider.signin === 'function') {
+      await provider.signin()
+    } else {
+      console.error(`Provider '${providerName}' does not export a signin function.`)
+      process.exit(1)
+    }
+  } catch (error) {
+    if (error.code === 'MODULE_NOT_FOUND') {
+      console.error(`Provider '${providerName}' not found.`)
+      console.log('\nRun `vps signin` to see available providers.')
+      process.exit(1)
+    } else {
+      console.error(`Error loading provider '${providerName}':`, error.message)
+      process.exit(1)
+    }
   }
 })()
