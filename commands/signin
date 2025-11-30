@@ -1,15 +1,42 @@
 #!/usr/bin/env node
 // https://github.com/SeleniumHQ/selenium/tree/selenium-4.26.0/javascript/node/selenium-webdriver#usage
 // https://github.com/puppeteer/puppeteer/tree/v18.2.1#usage
-const { Builder } = require('./lib/driver')
+const { Builder } = require('selenium-webdriver')
 const { writeFile } = require('node:fs/promises')
+const { readdir } = require('node:fs/promises')
+const { join } = require('node:path')
 
-;(async function example() {
+async function listProviders() {
+  const providersDir = join(__dirname, '../providers')
+  try {
+    const files = await readdir(providersDir)
+    const providers = files.filter(file => file !== '.gitkeep' && !file.startsWith('.'))
+    
+    if (providers.length === 0) {
+      console.log('No providers available.')
+      return
+    }
+    
+    console.log('Available providers:')
+    providers.forEach(provider => {
+      console.log(`  - ${provider}`)
+    })
+  } catch (error) {
+    console.error('Error reading providers directory:', error.message)
+    process.exit(1)
+  }
+}
+
+;(async function signin() {
+  // If no arguments passed, list available providers
+  if (process.argv.length <= 2) {
+    await listProviders()
+    return
+  }
+
   let driver = await new Builder().forBrowser('chrome').build()
   try {
     await driver.get('https://arh.antoinevastel.com/bots/areyouheadless')
-    const data = await driver.takeScreenshot()
-    await writeFile('example.png', data, { encoding: 'base64' })
   } finally {
     await driver.quit();
   }
