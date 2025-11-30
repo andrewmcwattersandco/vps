@@ -1,0 +1,4 @@
+[file "Node.gitignore" from "https://github.com/github/gitignore.git"]
+commit = 86922aee426c32ffb6098f9a38c42da75169501e
+branch = main
+target = .gitignore
