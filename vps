@@ -11,3 +11,13 @@ fi
 
 command=$1
 shift
+
+case $command in
+    signin)
+        ./commands/signin "$@"
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac
