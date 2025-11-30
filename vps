@@ -16,6 +16,9 @@ case $command in
     signin)
         ./commands/signin "$@"
         ;;
+    list)
+        ./commands/list "$@"
+        ;;
     *)
         usage
         exit 2

@@ -1,0 +1,248 @@
+#!/usr/bin/env node
+const { readdir } = require('node:fs/promises')
+const { readFile, writeFile } = require('node:fs/promises')
+const { join } = require('node:path')
+const { existsSync } = require('node:fs')
+const readline = require('readline')
+
+const CACHE_DIR = join(require('os').homedir(), '.vps', 'cache')
+const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+async function ensureCacheDir() {
+  const { mkdir } = require('node:fs/promises')
+  try {
+    await mkdir(CACHE_DIR, { recursive: true })
+  } catch (error) {
+    // Directory already exists
+  }
+}
+
+async function getCachedVPSList(providerName) {
+  const cacheFile = join(CACHE_DIR, `${providerName}.json`)
+  
+  if (!existsSync(cacheFile)) {
+    return null
+  }
+  
+  try {
+    const data = await readFile(cacheFile, 'utf8')
+    const cached = JSON.parse(data)
+    const age = Date.now() - cached.timestamp
+    
+    if (age < CACHE_TTL) {
+      return cached.vpses
+    }
+  } catch (error) {
+    // Cache file is invalid, ignore
+  }
+  
+  return null
+}
+
+async function setCachedVPSList(providerName, vpses) {
+  await ensureCacheDir()
+  const cacheFile = join(CACHE_DIR, `${providerName}.json`)
+  
+  const data = {
+    timestamp: Date.now(),
+    vpses
+  }
+  
+  await writeFile(cacheFile, JSON.stringify(data, null, 2))
+}
+
+async function loadCredentials(serviceName) {
+  try {
+    const keytar = require('keytar')
+    const credentials = await keytar.findCredentials(serviceName)
+    if (credentials && credentials.length > 0) {
+      return {
+        username: credentials[0].account,
+        password: credentials[0].password
+      }
+    }
+  } catch (error) {
+    // keytar not available, continue without saved credentials
+  }
+  return null
+}
+
+async function promptCredentials(providerName) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  })
+
+  return new Promise((resolve) => {
+    rl.question(`Username: `, (username) => {
+      const originalWriteToOutput = rl._writeToOutput
+      rl._writeToOutput = function _writeToOutput(stringToWrite) {
+        if (stringToWrite === '\n' || stringToWrite === '\r\n') {
+          rl.output.write(stringToWrite)
+        } else if (stringToWrite !== 'Password: ') {
+          rl.output.write('*')
+        } else {
+          rl.output.write(stringToWrite)
+        }
+      }
+      
+      rl.question(`Password: `, (password) => {
+        rl._writeToOutput = originalWriteToOutput
+        rl.output.write('\n')
+        rl.close()
+        resolve({ username, password })
+      })
+    })
+  })
+}
+
+async function saveCredentials(serviceName, username, password) {
+  try {
+    const keytar = require('keytar')
+    await keytar.setPassword(serviceName, username, password)
+  } catch (error) {
+    // Ignore if keytar is not available
+  }
+}
+
+function formatVPSList(vpses, providerName) {
+  if (!vpses || vpses.length === 0) {
+    console.log(`No VPSes found for ${providerName}`)
+    return
+  }
+  
+  console.log(`\n${providerName.toUpperCase()} VPSes:`)
+  console.log('─'.repeat(80))
+  
+  for (const vps of vpses) {
+    const status = vps.status === 'Active' ? '✓' : (vps.status === 'Suspended' ? '✗' : '•')
+    console.log(`${status} ${vps.name || vps.id}`)
+    
+    if (vps.ip) {
+      console.log(`  IP: ${vps.ip}`)
+    }
+    
+    if (vps.plan) {
+      console.log(`  Plan: ${vps.plan}`)
+    }
+    
+    if (vps.location) {
+      console.log(`  Location: ${vps.location}`)
+    }
+    
+    if (vps.status) {
+      console.log(`  Status: ${vps.status}`)
+    }
+    
+    console.log('')
+  }
+}
+
+async function listProviders() {
+  const providersDir = join(__dirname, '../providers')
+  try {
+    const files = await readdir(providersDir)
+    return files
+      .filter(file => file !== '.gitkeep' && !file.startsWith('.') && file.endsWith('.js'))
+      .map(file => file.replace(/\.js$/, ''))
+  } catch (error) {
+    return []
+  }
+}
+
+async function listVPSes(providerName, skipCache = false) {
+  const { resolve } = require('node:path')
+  const providerPath = resolve(__dirname, '../providers', `${providerName}.js`)
+  
+  try {
+    // Check cache first (unless skipCache is true)
+    if (!skipCache) {
+      const cached = await getCachedVPSList(providerName)
+      if (cached) {
+        console.log('(using cached data)')
+        return cached
+      }
+    }
+    
+    // Load the provider module
+    const provider = require(providerPath)
+    
+    // Get the service name from the provider
+    let serviceName = `vps-${providerName}`
+    if (typeof provider === 'function' && provider.serviceName) {
+      serviceName = provider.serviceName
+    } else if (provider.serviceName) {
+      serviceName = provider.serviceName
+    }
+    
+    // Try to load saved credentials
+    let credentials = await loadCredentials(serviceName)
+    
+    // If no saved credentials, prompt for them
+    if (!credentials) {
+      console.log(`No saved credentials for ${providerName}`)
+      credentials = await promptCredentials(providerName)
+      await saveCredentials(serviceName, credentials.username, credentials.password)
+    }
+    
+    // Call the provider's list function
+    let vpses
+    if (provider.list) {
+      vpses = await provider.list(credentials)
+    } else {
+      console.error(`Provider '${providerName}' does not support listing VPSes.`)
+      return []
+    }
+    
+    // Cache the results
+    await setCachedVPSList(providerName, vpses)
+    
+    return vpses
+  } catch (error) {
+    if (error.code === 'MODULE_NOT_FOUND') {
+      console.error(`Provider '${providerName}' not found.`)
+    } else {
+      console.error(`Error listing VPSes for '${providerName}':`, error.message)
+    }
+    return []
+  }
+}
+
+;(async function list() {
+  // Parse arguments
+  const args = process.argv.slice(2)
+  let providerName = null
+  let refresh = false
+  
+  for (const arg of args) {
+    if (arg === '--refresh' || arg === '-r') {
+      refresh = true
+    } else if (!arg.startsWith('-')) {
+      providerName = arg
+    }
+  }
+  
+  if (refresh) {
+    console.log('Refreshing...')
+  }
+  
+  if (providerName) {
+    // List VPSes from specific provider
+    const vpses = await listVPSes(providerName, refresh)
+    formatVPSList(vpses, providerName)
+  } else {
+    // List VPSes from all providers
+    const providers = await listProviders()
+    
+    if (providers.length === 0) {
+      console.log('No providers available.')
+      console.log('Run `vps signin` to see available providers.')
+      return
+    }
+    
+    for (const provider of providers) {
+      const vpses = await listVPSes(provider, refresh)
+      formatVPSList(vpses, provider)
+    }
+  }
+})()

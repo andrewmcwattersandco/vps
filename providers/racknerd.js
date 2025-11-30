@@ -63,7 +63,114 @@ async function signin({ username, password }) {
   }
 }
 
+async function list({ username, password }) {
+  const options = new chrome.Options()
+  options.addArguments('--headless=new')
+  options.addArguments('--disable-gpu')
+  options.addArguments('--no-sandbox')
+  options.addArguments('--disable-dev-shm-usage')
+  
+  let driver = await new Builder()
+    .forBrowser('chrome')
+    .setChromeOptions(options)
+    .build()
+  
+  try {
+    console.log('Fetching VPS list from RackNerd...')
+    
+    // Login first
+    await driver.get('https://my.racknerd.com/index.php?rp=/login')
+    
+    const usernameField = await driver.wait(
+      until.elementLocated(By.css('#inputEmail')),
+      10000
+    )
+    await driver.wait(until.elementIsVisible(usernameField), 5000)
+    await usernameField.sendKeys(username)
+    
+    const passwordField = await driver.findElement(By.css('#inputPassword'))
+    await driver.wait(until.elementIsVisible(passwordField), 5000)
+    await passwordField.sendKeys(password)
+    
+    const loginButton = await driver.findElement(By.css('#login'))
+    await driver.wait(until.elementIsVisible(loginButton), 5000)
+    await loginButton.click()
+    
+    // Wait for login to complete
+    await driver.wait(async () => {
+      const currentUrl = await driver.getCurrentUrl()
+      return !currentUrl.includes('/login')
+    }, 15000)
+    
+    // Navigate to services page
+    await driver.get('https://my.racknerd.com/clientarea.php?action=services')
+    
+    // Wait for services table to load
+    await driver.wait(
+      until.elementLocated(By.css('#tableServicesList')),
+      10000
+    )
+    
+    // Scrape VPS information from table
+    const vpses = []
+    const serviceRows = await driver.findElements(By.css('#tableServicesList > tbody > tr'))
+    
+    for (const row of serviceRows) {
+      try {
+        // Get plan name from the first column
+        const planElement = await row.findElement(By.css('td.sorting_1 > strong'))
+        const plan = await planElement.getText()
+        
+        // Get all cells in the row
+        const cells = await row.findElements(By.css('td'))
+        
+        // Extract text from all cells for parsing
+        const cellTexts = []
+        for (const cell of cells) {
+          const text = await cell.getText()
+          cellTexts.push(text)
+        }
+        
+        const rowText = cellTexts.join(' ')
+        
+        // Extract IP if present
+        const ipMatch = rowText.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/)
+        const ip = ipMatch ? ipMatch[1] : null
+        
+        // Extract status
+        let status = 'Unknown'
+        if (rowText.includes('Active')) status = 'Active'
+        else if (rowText.includes('Suspended')) status = 'Suspended'
+        else if (rowText.includes('Pending')) status = 'Pending'
+        else if (rowText.includes('Cancelled')) status = 'Cancelled'
+        
+        vpses.push({
+          name: plan,
+          plan,
+          ip,
+          status,
+          provider: 'racknerd'
+        })
+      } catch (err) {
+        // Skip this row if we can't parse it
+        continue
+      }
+    }
+    
+    return vpses
+  } catch (error) {
+    console.error('Error fetching VPS list:', error.message)
+    return []
+  } finally {
+    await driver.quit()
+  }
+}
+
 // Export service name for keytar to use
 signin.serviceName = 'my.racknerd.com'
+list.serviceName = 'my.racknerd.com'
 
 module.exports = signin
+module.exports.signin = signin
+module.exports.list = list
+module.exports.serviceName = 'my.racknerd.com'
