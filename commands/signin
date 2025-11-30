@@ -1,1 +1,16 @@
 #!/usr/bin/env node
+// https://github.com/SeleniumHQ/selenium/tree/selenium-4.26.0/javascript/node/selenium-webdriver#usage
+// https://github.com/puppeteer/puppeteer/tree/v18.2.1#usage
+const { Builder } = require('./lib/driver')
+const { writeFile } = require('node:fs/promises')
+
+;(async function example() {
+  let driver = await new Builder().forBrowser('chrome').build()
+  try {
+    await driver.get('https://arh.antoinevastel.com/bots/areyouheadless')
+    const data = await driver.takeScreenshot()
+    await writeFile('example.png', data, { encoding: 'base64' })
+  } finally {
+    await driver.quit();
+  }
+})()
