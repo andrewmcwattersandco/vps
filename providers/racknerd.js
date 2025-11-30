@@ -1,7 +1,18 @@
 const { Builder, By, until } = require('../commands/node_modules/selenium-webdriver')
+const chrome = require('../commands/node_modules/selenium-webdriver/chrome')
 
 async function signin({ username, password }) {
-  let driver = await new Builder().forBrowser('chrome').build()
+  const options = new chrome.Options()
+  options.addArguments('--headless=new')
+  options.addArguments('--disable-gpu')
+  options.addArguments('--no-sandbox')
+  options.addArguments('--disable-dev-shm-usage')
+  
+  let driver = await new Builder()
+    .forBrowser('chrome')
+    .setChromeOptions(options)
+    .build()
+  
   try {
     console.log('Opening RackNerd login page...')
     await driver.get('https://my.racknerd.com/index.php?rp=/login')
@@ -40,15 +51,15 @@ async function signin({ username, password }) {
       }, 15000)
       
       console.log('Successfully signed in!')
+      
+      // Get and display the final URL
+      const finalUrl = await driver.getCurrentUrl()
+      console.log(`Logged in at: ${finalUrl}`)
     }
-    
-    // Keep the browser open so user can interact with the authenticated session
-    console.log('Browser session is active. Press Ctrl+C to close.')
-    await new Promise(() => {}) // Wait indefinitely
   } catch (error) {
     console.error('Error during signin:', error.message)
+  } finally {
     await driver.quit()
-    process.exit(1)
   }
 }
 
