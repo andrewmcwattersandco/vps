@@ -17,6 +17,17 @@ async function signin({ username, password }) {
     console.log('Opening RackNerd login page...')
     await driver.get('https://my.racknerd.com/index.php?rp=/login')
     
+    // Check for CloudFlare challenge
+    const pageTitle = await driver.getTitle()
+    const pageSource = await driver.getPageSource()
+    
+    if (pageTitle.includes('Just a moment') || 
+        pageSource.includes('Verifying you are human') ||
+        pageSource.includes('cloudflare')) {
+      console.error('Unable to connect due to CloudFlare challenge.')
+      throw new Error('CloudFlare challenge detected')
+    }
+    
     if (username && password) {
       console.log(`Signing in as ${username}...`)
       
@@ -76,10 +87,18 @@ async function list({ username, password }) {
     .build()
   
   try {
-    console.log('Fetching VPS list from RackNerd...')
-    
     // Login first
     await driver.get('https://my.racknerd.com/index.php?rp=/login')
+    
+    // Check for CloudFlare challenge
+    const pageTitle = await driver.getTitle()
+    const pageSource = await driver.getPageSource()
+    
+    if (pageTitle.includes('Just a moment') || 
+        pageSource.includes('Verifying you are human') ||
+        pageSource.includes('cloudflare')) {
+      throw new Error('Permission denied to access provider "racknerd"')
+    }
     
     const usernameField = await driver.wait(
       until.elementLocated(By.css('#inputEmail')),
@@ -121,7 +140,12 @@ async function list({ username, password }) {
         const planElement = await row.findElement(By.css('td.sorting_1 > strong'))
         const plan = await planElement.getText()
         
-        // Get all cells in the row
+        // Get pricing from the third column
+        const pricingCell = await row.findElement(By.css('td:nth-child(3)'))
+        const pricingRaw = await pricingCell.getText()
+        const pricing = pricingRaw.replace(/\n/g, ' ').trim()
+        
+        // Get all cells in the row for parsing other data
         const cells = await row.findElements(By.css('td'))
         
         // Extract text from all cells for parsing
@@ -149,6 +173,7 @@ async function list({ username, password }) {
           plan,
           ip,
           status,
+          pricing,
           provider: 'racknerd'
         })
       } catch (err) {

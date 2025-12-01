@@ -111,30 +111,50 @@ function formatVPSList(vpses, providerName) {
     return
   }
   
-  console.log(`\n${providerName.toUpperCase()} VPSes:`)
-  console.log('─'.repeat(80))
+  // ANSI color codes
+  const grey = '\x1b[90m'
+  const green = '\x1b[32m'
+  const reset = '\x1b[0m'
   
+  // Calculate column widths
+  const ipWidth = Math.max(15, ...vpses.map(v => (v.ip || 'N/A').length))
+  const nameWidth = Math.max(30, ...vpses.map(v => (v.name || v.plan || 'N/A').length))
+  const statusWidth = Math.max(10, ...vpses.map(v => (v.status || 'Unknown').length))
+  const pricingWidth = Math.max(20, ...vpses.map(v => (v.pricing || 'N/A').length))
+  const providerWidth = Math.max(10, ...vpses.map(v => (v.provider || 'N/A').length))
+  
+  // Print header
+  console.log(
+    'IP ADDRESS'.padEnd(ipWidth) + '   ' +
+    'NAME'.padEnd(nameWidth) + '   ' +
+    'STATUS'.padEnd(statusWidth) + '   ' +
+    'PRICING'.padEnd(pricingWidth) + '   ' +
+    'PROVIDER'
+  )
+  
+  // Print each VPS
   for (const vps of vpses) {
-    const status = vps.status === 'Active' ? '✓' : (vps.status === 'Suspended' ? '✗' : '•')
-    console.log(`${status} ${vps.name || vps.id}`)
+    const ip = (vps.ip || 'N/A').padEnd(ipWidth)
+    const name = (vps.name || vps.plan || 'N/A').padEnd(nameWidth)
+    const statusText = (vps.status || 'Unknown').padEnd(statusWidth)
+    const pricing = (vps.pricing || 'N/A').padEnd(pricingWidth)
+    const provider = (vps.provider || 'N/A').padEnd(providerWidth)
     
-    if (vps.ip) {
-      console.log(`  IP: ${vps.ip}`)
+    // Apply colors based on status
+    const isCancelled = vps.status === 'Cancelled'
+    const isActive = vps.status === 'Active'
+    
+    if (isCancelled) {
+      // Grey out entire row for cancelled services
+      console.log(`${grey}${ip}   ${name}   ${statusText}   ${pricing}   ${provider}${reset}`)
+    } else if (isActive) {
+      // Green "Active" status only
+      const statusColored = `${green}${statusText}${reset}`
+      console.log(`${ip}   ${name}   ${statusColored}   ${pricing}   ${provider}`)
+    } else {
+      // Default - no coloring
+      console.log(`${ip}   ${name}   ${statusText}   ${pricing}   ${provider}`)
     }
-    
-    if (vps.plan) {
-      console.log(`  Plan: ${vps.plan}`)
-    }
-    
-    if (vps.location) {
-      console.log(`  Location: ${vps.location}`)
-    }
-    
-    if (vps.status) {
-      console.log(`  Status: ${vps.status}`)
-    }
-    
-    console.log('')
   }
 }
 
@@ -159,7 +179,6 @@ async function listVPSes(providerName, skipCache = false) {
     if (!skipCache) {
       const cached = await getCachedVPSList(providerName)
       if (cached) {
-        console.log('(using cached data)')
         return cached
       }
     }
@@ -213,10 +232,21 @@ async function listVPSes(providerName, skipCache = false) {
   const args = process.argv.slice(2)
   let providerName = null
   let refresh = false
+  let statusFilter = null
   
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
     if (arg === '--refresh' || arg === '-r') {
       refresh = true
+    } else if (arg === '--status') {
+      // Get the next argument as the status value
+      if (i + 1 < args.length) {
+        statusFilter = args[i + 1].toLowerCase()
+        i++ // Skip the next argument since we consumed it
+      }
+    } else if (arg.startsWith('--status=')) {
+      // Handle --status=value format
+      statusFilter = arg.split('=')[1].toLowerCase()
     } else if (!arg.startsWith('-')) {
       providerName = arg
     }
@@ -228,7 +258,13 @@ async function listVPSes(providerName, skipCache = false) {
   
   if (providerName) {
     // List VPSes from specific provider
-    const vpses = await listVPSes(providerName, refresh)
+    let vpses = await listVPSes(providerName, refresh)
+    
+    // Apply status filter if provided
+    if (statusFilter) {
+      vpses = vpses.filter(vps => vps.status && vps.status.toLowerCase() === statusFilter)
+    }
+    
     formatVPSList(vpses, providerName)
   } else {
     // List VPSes from all providers
@@ -241,7 +277,13 @@ async function listVPSes(providerName, skipCache = false) {
     }
     
     for (const provider of providers) {
-      const vpses = await listVPSes(provider, refresh)
+      let vpses = await listVPSes(provider, refresh)
+      
+      // Apply status filter if provided
+      if (statusFilter) {
+        vpses = vpses.filter(vps => vps.status && vps.status.toLowerCase() === statusFilter)
+      }
+      
       formatVPSList(vpses, provider)
     }
   }
